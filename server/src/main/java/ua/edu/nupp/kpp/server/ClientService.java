@@ -31,7 +31,7 @@ public class ClientService {
 
     public void delete(long id) throws SQLException {
         dao.delete(id);
-        LOG.info("ВИдалено клієнта");
+        LOG.info("Видалено клієнта");
     }
 
     static void validate(Client c) {
