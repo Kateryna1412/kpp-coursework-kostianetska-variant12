@@ -30,7 +30,6 @@ public class MainApp extends Application {
         stage.setTitle("Система обліку прокату обладнання");
         stage.show();
         refreshAll();
-        readTestEquipment();
     }
 
     private Pane clientPane() {
@@ -49,12 +48,87 @@ public class MainApp extends Application {
         equipment.getColumns().setAll(col("ID", "id"), col("Назва", "name"), col("Категорія", "category"), col("Тариф за день", "rentalRate"));
         TextField name = new TextField(), category = new TextField(), rentalRate = new TextField();
         Button add = new Button("Додати"), update = new Button("Змінити"), delete = new Button("Видалити"), refresh = new Button("Оновити");
+        Button importCsv = new Button("Імпортувати CSV"), cancelImport = new Button("Скасувати");
+        cancelImport.setDisable(true);
+        ProgressBar progress = new ProgressBar(0);
+        Label status = new Label("CSV не запущено");
+        final ImportEquipmentTask[] currentTask = new ImportEquipmentTask[1];
+
         add.setOnAction(e -> safe(() -> { api.addEquipment(readEquipment(null, name, category, rentalRate)); refreshEquipment(); }));
         update.setOnAction(e -> safe(() -> { Equipment eq = selected(equipment); api.updateEquipment(readEquipment(eq.getId(), name, category, rentalRate)); refreshEquipment(); }));
         delete.setOnAction(e -> safe(() -> { api.deleteEquipment(selected(equipment).getId()); refreshAll(); }));
         refresh.setOnAction(e -> refreshEquipment());
-        equipment.getSelectionModel().selectedItemProperty().addListener((o, a, eq) -> { if(eq != null) { name.setText(eq.getName()); category.setText(eq.getCategory()); rentalRate.setText("" + eq.getRentalRate()); } });
-        return layout(equipment, new VBox(8, new Label("Назва"), name, new Label("Категорія"), category, new Label("Тариф за день"), rentalRate, new HBox(8, add, update, delete, refresh)));
+        equipment.getSelectionModel().selectedItemProperty().addListener((o, a, eq) -> { if (eq != null) { name.setText(eq.getName()); category.setText(eq.getCategory()); rentalRate.setText("" + eq.getRentalRate()); } });
+
+        cancelImport.setOnAction(e -> {
+            if (currentTask[0] != null) {
+                currentTask[0].cancel();
+            }
+        });
+
+        importCsv.setOnAction(e -> {
+            ImportEquipmentTask task = new ImportEquipmentTask(Path.of("sample-data", "equipment.csv"), api);
+            currentTask[0] = task;
+            progress.progressProperty().bind(task.progressProperty());
+            status.textProperty().bind(task.messageProperty());
+            importCsv.setDisable(true);
+            cancelImport.setDisable(false);
+
+            task.setOnSucceeded(x -> {
+                progress.progressProperty().unbind();
+                status.textProperty().unbind();
+                importCsv.setDisable(false);
+                cancelImport.setDisable(true);
+                currentTask[0] = null;
+                if (task.getProcessed() == 0 && task.getSkipped() == 0) {
+                    status.setText("Немає рядків для імпорту");
+                } else {
+                    status.setText("Готово. Опрацьовано: " + task.getProcessed() + ", імпортовано: " + task.getValue() + ", пропущено: " + task.getSkipped());
+                }
+                refreshEquipment();
+            });
+
+            task.setOnFailed(x -> {
+                progress.progressProperty().unbind();
+                status.textProperty().unbind();
+                importCsv.setDisable(false);
+                cancelImport.setDisable(true);
+                currentTask[0] = null;
+
+                Throwable ex = task.getException();
+                LOG.log(java.util.logging.Level.WARNING, "Помилка під час CSV-імпорту", ex);
+
+                String reason = (ex != null && ex.getMessage() != null && !ex.getMessage().isBlank())
+                        ? ex.getMessage()
+                        : "Сервер недоступний або сталася помилка імпорту";
+                status.setText("Помилка: " + reason + " (перевірте БД — частина записів могла зберегтися)");
+                showError(new RuntimeException(reason));
+                refreshEquipment();
+            });
+
+            task.setOnCancelled(x -> {
+                progress.progressProperty().unbind();
+                status.textProperty().unbind();
+                importCsv.setDisable(false);
+                cancelImport.setDisable(true);
+                currentTask[0] = null;
+
+                status.setText("Імпорт скасовано; частина записів могла бути збережена");
+                refreshEquipment();
+            });
+            Thread thread = new Thread(task, "csv-import");
+            thread.setDaemon(true);
+            thread.start();
+        });
+
+        VBox form = new VBox(6,
+                new Label("Назва"), name,
+                new Label("Категорія"), category,
+                new Label("Тариф за день"), rentalRate,
+                new HBox(8, add, update, delete, refresh),
+                new HBox(8, importCsv, cancelImport),
+                progress, status);
+        return layout(equipment, form);
     }
 
     private Pane requestPane() {
@@ -93,24 +167,6 @@ public class MainApp extends Application {
 
     private RentalContract readContract(Long id, TextField requestId, TextField contractDate, TextField totalCost) {
         return new RentalContract(id, Long.parseLong(requestId.getText()), contractDate.getText(), Double.parseDouble(totalCost.getText()));
-    }
-
-    // --- Допоміжний метод читання CSV
-    private void readTestEquipment() {
-        safe(() -> {
-            Path file = Path.of("sample-data", "equipment.csv");
-            try {
-                java.util.List<String> lines = java.nio.file.Files.readAllLines(file);
-                if (lines.size() < 2) return;
-                String[] p = lines.get(1).split(";", -1);
-                if (p.length != 3) throw new IllegalArgumentException("Некоректна кількість стовпців: " + p.length);
-                Equipment eq = new Equipment(null, p[0].trim(), p[1].trim(), Double.parseDouble(p[2].trim()));
-                api.addEquipment(eq);
-                refreshEquipment();
-            } catch (java.io.IOException e) {
-                throw new RuntimeException("Помилка читання CSV файлу: " + e.getMessage(), e);
-            }
-        });
     }
 
     private void refreshAll() { refreshClients(); refreshEquipment(); refreshRequests(); refreshContracts(); }
