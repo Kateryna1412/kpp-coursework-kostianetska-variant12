@@ -15,7 +15,7 @@ kpp-coursework-kostianetska-variant12/
 ├── server/          # серверна частина (моделі, DAO, Service, Servlet, тести JUnit 5)
 └── client/          # JavaFX-клієнт (UI, HTTP-клієнт, фоновий імпорт)
     └── sample-data/ # вхідний CSV (equipment.csv)
-
+```
 ## Запуск
 
 1. Створити базу даних MySQL за файлом `database.sql` (база: `equipment_rental`, таблиці відповідно до структури варіанта) та за потреби задати локальні параметри підключення до БД (без збереження реальних паролів у репозиторії).
